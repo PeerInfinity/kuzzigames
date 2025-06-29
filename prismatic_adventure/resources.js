@@ -953,7 +953,11 @@ let resourceActions = {
   },
   "interdimensional_ore": {
     onConsume: (gameState, amt) => {
-      const serenityGainPotential = ((gameState.bestCompletedZone ** gameState.serenityGainZoneExponent) / gameState.resetsForBestZone)
+      // MOD: Use appropriate divisor based on game mods settings
+              const divisor = gameState.gameMods?.useConstantSerenityScaling 
+          ? gameState.gameMods.serenityGainDivisor 
+          : gameState.resetsForBestZone;
+      const serenityGainPotential = ((gameState.bestCompletedZone ** gameState.serenityGainZoneExponent) / divisor)
       gameState.serenity += serenityGainPotential * 0.025 * amt;
       showMessage(`Used ${amt} Dimensional Ore${amt > 1 ? "s" : ""}.<br>Gained ${formatNumber(serenityGainPotential * 0.025 * amt)} Serenity.`, backgroundColors["resource"]);
       showSerenityIfUnlocked();

@@ -74,6 +74,45 @@
       automationOverrides : {},
       cognitiveCache: {},
 
+      // MOD: New game mods and automation settings
+      gameMods: {
+        permanentAutomation: false,
+        awardSerenityOnDiscovery: false,
+        useConstantSerenityScaling: false,
+        serenityGainDivisor: 1000,
+        enableAdvancedAutomation: false,
+        disablePauseOnGameOver: false,
+        disableSerenityUnlockedModal: false,
+        disable10CompletionRequirement: false
+      },
+      automation: {
+        resumeOnReset: false,
+        autoApplyArmor: false,
+        // New auto-use options
+        disableAutoUseOnCopiumReset: false,
+        enableAutoUseAfterEnergyResets: false,
+        enableAutoUseResetCount: 1,
+        disableAutoUseAfterEnergyResets: false,
+        disableAutoUseResetCount: 1,
+        energyResetsSinceAutoUseChange: 0,
+        lockAutomationOrder: false,
+        
+        autoUseGauntletOnReset: false,
+    autoUseGauntletWhenEven: false,
+    autoUseGauntletAllButOne: false,
+        
+            autoUseStardustOnReset: false,
+        stardustResetResource: "cybernetic_armor",
+        
+        // Auto-use Cosmic Shard for Action
+        autoUseCosmicShardForAction: false,
+        cosmicShardTargetAction: "",
+        
+        // Stop automation at specific zone
+        stopAutomationAtZone: false,
+        stopAutomationZoneNumber: 1
+      },
+
       serenityUnlockables: {},
       serenityInfinite: {},
 
@@ -100,9 +139,11 @@
       powerGainMultiplier: 1,
       autoConsumeEnabled: false,
       consumeMinusOneEnabled: false,
+      automationCollapsed: true,
       elixirEnergy: 3,
       startingLevel: 1,
       serenityGainZoneExponent: 3,
+    serenityGainDivisor: 1000,
       satoshiSerenity: 0,
       maxDelusion: 9000,
       copiumReactorEnergy: 6,
@@ -182,6 +223,26 @@
       gameState.resources[name] = 2;
       showMessage("You can only have 2 eyes.");
     }
+    // Auto-use Gauntlet logic on acquisition (only if auto-use is enabled)
+    if (name === "infinity_gauntlet" && gameState.autoConsumeEnabled) {
+      // Auto-use One Gauntlet when Even
+      if (gameState.automation?.autoUseGauntletWhenEven && gameState.resources[name] % 2 === 0) {
+        setTimeout(() => {
+          // Use setTimeout to ensure the resource display is updated first
+          consumeResource("infinity_gauntlet", 1);
+          showMessage("Auto-used 1 Infinity Gauntlet (even count detected)!", backgroundColors["resource"]);
+        }, 10);
+      }
+      // Auto-use All but One Gauntlet on Acquisition (only if more than one and the "even" logic didn't trigger)
+      else if (gameState.automation?.autoUseGauntletAllButOne && gameState.resources[name] > 1) {
+        setTimeout(() => {
+          const useCount = gameState.resources[name] - 1; // Leave 1 gauntlet
+          consumeResource("infinity_gauntlet", useCount);
+          showMessage(`Auto-used ${useCount} Infinity Gauntlet${useCount > 1 ? "s" : ""} (keeping 1)!`, backgroundColors["resource"]);
+        }, 10);
+      }
+    }
+    
     // Instead of full re-render, update only this resource.
     updateResourceDisplay(name);
   }
@@ -718,7 +779,7 @@
   }
   
   
-  // A helper to show a custom “Load this save?” modal
+  // A helper to show a custom "Load this save?" modal
   function showPasteConfirmationModal(onConfirm) {
     // Create the modal overlay
     const modal = document.createElement("div");
@@ -1426,115 +1487,317 @@
     displayZone();
   }
 
-  function handleGameOver() {
-    // Get or create the overlay container.
-    let energyScreen = document.getElementById("gameOverScreenEnergy");
-    if (!energyScreen) {
-      energyScreen = document.createElement("div");
-      energyScreen.id = "gameOverScreenEnergy";
-      document.body.appendChild(energyScreen);
-    }
-    // Reinitialize its inner HTML so that the expected content is always there.
-    energyScreen.innerHTML = `
-      <div id="gameOverContentEnergy">
-        <h2>Game Over</h2>
-        <p>You ran out of energy.</p>
-        <p>You lose half your resources.</p>
-        <button id="restartButtonEnergy">Restart</button>
-      </div>
-    `;
-    // Attach the restart button listener
-    energyScreen.querySelector("#restartButtonEnergy").addEventListener("click", debounce(() => {
-      energyScreen.style.display = "none";
+  function handleGameOver(wasAutoRunning = false, automationMode = "zone") {
+    if (gameState.gameMods?.disablePauseOnGameOver) {
+      // Auto-restart immediately without showing popup
+      if (gameState.soundEnabled) energyGameOverSound.play();
+      showMessage("Game Over: Energy depleted! Auto-restarting...", backgroundColors["resource"]);
       resetGame("energyLoss");
-    }, 2000));
-    // Now update the reset message.
-    const energyContent = energyScreen.querySelector("#gameOverContentEnergy");
-    let resetMsg = energyContent.querySelector("#energyResetMsg");
-    if (!resetMsg) {
-      resetMsg = document.createElement("p");
-      resetMsg.id = "energyResetMsg";
-      energyContent.appendChild(resetMsg);
+    } else {
+      // Original behavior: show modal and wait for user input
+      let energyScreen = document.getElementById("gameOverScreenEnergy");
+      if (!energyScreen) {
+        energyScreen = document.createElement("div");
+        energyScreen.id = "gameOverScreenEnergy";
+        document.body.appendChild(energyScreen);
+      }
+      energyScreen.innerHTML = `
+        <div id="gameOverContentEnergy">
+          <h2>Game Over</h2>
+          <p>You ran out of energy.</p>
+          <p>You lose half your resources.</p>
+          <button id="restartButtonEnergy">Restart</button>
+        </div>
+      `;
+      energyScreen.querySelector("#restartButtonEnergy").addEventListener("click", debounce(() => {
+        energyScreen.style.display = "none";
+        resetGame("energyLoss");
+        // Handle automation restoration for modal version
+        if (wasAutoRunning && automationMode === "all" && gameState.automation?.resumeOnReset) {
+          setTimeout(() => {
+            gameState.autoRun = true;
+            gameState.automationMode = automationMode;
+            showMessage(`Automation resumed in ${automationMode} mode.`, backgroundColors["perk"]);
+            updateAutomationButtonStyles();
+          }, 100);
+        }
+      }, 2000));
+      const energyContent = energyScreen.querySelector("#gameOverContentEnergy");
+      let resetMsg = energyContent.querySelector("#energyResetMsg");
+      if (!resetMsg) {
+        resetMsg = document.createElement("p");
+        resetMsg.id = "energyResetMsg";
+        energyContent.appendChild(resetMsg);
+      }
+      resetMsg.textContent = "This is your " + (gameState.numEnergyResets + 1) + getOrdinalSuffix(gameState.numEnergyResets + 1) + " Energy reset.";
+      energyScreen.style.display = "flex";
+      if (gameState.soundEnabled) energyGameOverSound.play();
+      return; // Don't continue with automation logic below
     }
-    resetMsg.textContent =
-      "This is your " +
-      (gameState.numEnergyResets + 1) +
-      getOrdinalSuffix(gameState.numEnergyResets + 1) +
-      " Energy reset.";
-    energyScreen.style.display = "flex";
-    if (gameState.soundEnabled) energyGameOverSound.play();
+    
+    // Handle new auto-use reset options
+    gameState.automation.energyResetsSinceAutoUseChange = (gameState.automation.energyResetsSinceAutoUseChange || 0) + 1;
+    
+    // Track if we've already toggled auto-use on this reset to prevent multiple toggles
+    let autoUseToggledThisReset = false;
+    
+    // Handle enabling auto-use after energy resets (if it's currently disabled)
+    if (!autoUseToggledThisReset && gameState.automation?.enableAutoUseAfterEnergyResets && !gameState.autoConsumeEnabled) {
+      if (gameState.automation.energyResetsSinceAutoUseChange >= gameState.automation.enableAutoUseResetCount) {
+        gameState.autoConsumeEnabled = true;
+        gameState.automation.energyResetsSinceAutoUseChange = 0; // Reset counter
+        autoUseToggledThisReset = true;
+        showMessage("Auto-Use enabled after energy resets!", backgroundColors["perk"]);
+        
+        // Update the button visual state
+        setTimeout(() => {
+          const autoUseButton = document.getElementById("autoConsumeBtn");
+          if (autoUseButton) {
+            autoUseButton.classList.add("active");
+          }
+        }, 100);
+      }
+    }
+    
+    // Handle disabling auto-use after energy resets (if it's currently enabled)
+    if (!autoUseToggledThisReset && gameState.automation?.disableAutoUseAfterEnergyResets && gameState.autoConsumeEnabled) {
+      if (gameState.automation.energyResetsSinceAutoUseChange >= gameState.automation.disableAutoUseResetCount) {
+        gameState.autoConsumeEnabled = false;
+        gameState.automation.energyResetsSinceAutoUseChange = 0; // Reset counter
+        autoUseToggledThisReset = true;
+        showMessage("Auto-Use disabled after energy resets!", backgroundColors["resource"]);
+        
+        // Update the button visual state
+        setTimeout(() => {
+          const autoUseButton = document.getElementById("autoConsumeBtn");
+          if (autoUseButton) {
+            autoUseButton.classList.remove("active");
+          }
+        }, 100);
+      }
+    }
+    
+
+    
+    // Save auto-consume state if stardust automation is enabled (to prevent conflicts)
+    let savedAutoConsumeState = null;
+    const effectiveAutoConsumeEnabled = gameState.autoConsumeEnabled;
+    
+    if (gameState.automation?.autoUseStardustOnReset && gameState.resources["stardust"] > 0) {
+      savedAutoConsumeState = gameState.autoConsumeEnabled;
+      gameState.autoConsumeEnabled = false;
+      
+      // Update the button visual state immediately
+      const autoUseButton = document.getElementById("autoConsumeBtn");
+      if (autoUseButton) {
+        autoUseButton.classList.remove("active");
+      }
+    }
+
+    // Auto-use All Gauntlets on Reset (after toggle auto-use check, if auto-use is enabled)
+    // Use saved state if stardust automation will run, otherwise use current state
+    const checkAutoConsume = savedAutoConsumeState !== null ? savedAutoConsumeState : gameState.autoConsumeEnabled;
+    if (gameState.automation?.autoUseGauntletOnReset && checkAutoConsume && gameState.resources["infinity_gauntlet"] > 0) {
+      const gauntletCount = gameState.resources["infinity_gauntlet"];
+      consumeResource("infinity_gauntlet", gauntletCount);
+      showMessage(`Auto-used ${gauntletCount} Infinity Gauntlet${gauntletCount > 1 ? "s" : ""} after energy reset!`, backgroundColors["resource"]);
+    }
+    
+    // Auto-use Stardust on Reset (after gauntlet auto-use)
+    if (gameState.automation?.autoUseStardustOnReset && gameState.resources["stardust"] > 0) {
+      const target = gameState.automation.stardustResetResource;
+      
+      // First, use one instance of the specified resource
+      if (!gameState.resourcesUsed[target]) {
+        if (!gameState.resources[target] || gameState.resources[target] === 0) {
+          addResource(target, 1);
+          consumeResource(target, 1);
+        } else {
+          consumeResource(target, 1);
+        }
+      }
+      
+      // Then use all remaining stardust
+      if (gameState.resources["stardust"] > 0) {
+        const stardustCount = gameState.resources["stardust"];
+        consumeResource("stardust", stardustCount);
+        showMessage(`Auto-used ${stardustCount} Stardust after energy reset!`, backgroundColors["resource"]);
+      }
+      
+      // Restore auto-consume state
+      gameState.autoConsumeEnabled = savedAutoConsumeState;
+      
+      // Update the button visual state
+      const autoUseButton = document.getElementById("autoConsumeBtn");
+      if (autoUseButton) {
+        if (gameState.autoConsumeEnabled) {
+          autoUseButton.classList.add("active");
+        } else {
+          autoUseButton.classList.remove("active");
+        }
+      }
+    } else if (savedAutoConsumeState !== null) {
+      // If stardust automation was supposed to run but no stardust was available, still restore the state
+      gameState.autoConsumeEnabled = savedAutoConsumeState;
+      
+      const autoUseButton = document.getElementById("autoConsumeBtn");
+      if (autoUseButton) {
+        if (gameState.autoConsumeEnabled) {
+          autoUseButton.classList.add("active");
+        } else {
+          autoUseButton.classList.remove("active");
+        }
+      }
+    }
+    
+    // Restore automation state after reset (only if "Resume on Reset" is enabled and it was in "All" mode)
+    if (wasAutoRunning && automationMode === "all" && gameState.automation?.resumeOnReset) {
+      setTimeout(() => {
+        gameState.autoRun = true;
+        gameState.automationMode = automationMode;
+        showMessage(`Automation resumed in ${automationMode} mode.`, backgroundColors["perk"]);
+        updateAutomationButtonStyles();
+      }, 100);
+    }
   }
   
 
-  function handleCopiumOverflow() {
-    let copiumScreen = document.getElementById("gameOverScreenCopium");
-    if (!copiumScreen) {
-      copiumScreen = document.createElement("div");
-      copiumScreen.id = "gameOverScreenCopium";
-      document.body.appendChild(copiumScreen);
-    }
-    copiumScreen.innerHTML = `
-      <div id="gameOverContentCopium">
-        <h2>Game Over</h2>
-        <p>It's over 9000! Your copium that is.</p>
-        <p>You lose all your resources and ${gameState.perks["knowledge_preserver"] ? "10% of" : "half"} your knowledge.</p>
-        <p>But you permanently gain ${gameState.perks["copium_reactor"] ? gameState.copiumReactorEnergy : 2} starting energy.</p>
-        <button id="restartButtonCopium">Restart</button>
-      </div>
-    `;
-    copiumScreen.querySelector("#restartButtonCopium").addEventListener("click", debounce(() => {
-      copiumScreen.style.display = "none";
+  function handleCopiumOverflow(wasAutoRunning = false, automationMode = "zone") {
+    if (gameState.gameMods?.disablePauseOnGameOver) {
+      // Auto-restart immediately without showing popup
+      if (gameState.soundEnabled) copiumGameOverSound.play();
+      showMessage("Game Over: Copium overflow! Auto-restarting...", backgroundColors["resource"]);
       resetGame("copiumOverflow");
-    }, 2000));
-    const copiumContent = copiumScreen.querySelector("#gameOverContentCopium");
-    let resetMsg = copiumContent.querySelector("#copiumResetMsg");
-    if (!resetMsg) {
-      resetMsg = document.createElement("p");
-      resetMsg.id = "copiumResetMsg";
-      copiumContent.appendChild(resetMsg);
+    } else {
+      // Original behavior: show modal and wait for user input
+      let copiumScreen = document.getElementById("gameOverScreenCopium");
+      if (!copiumScreen) {
+        copiumScreen = document.createElement("div");
+        copiumScreen.id = "gameOverScreenCopium";
+        document.body.appendChild(copiumScreen);
+      }
+      copiumScreen.innerHTML = `
+        <div id="gameOverContentCopium">
+          <h2>Game Over</h2>
+          <p>It's over 9000! Your copium that is.</p>
+          <p>You lose all your resources and ${gameState.perks["knowledge_preserver"] ? "10% of" : "half"} your knowledge.</p>
+          <p>But you permanently gain ${gameState.perks["copium_reactor"] ? gameState.copiumReactorEnergy : 2} starting energy.</p>
+          <button id="restartButtonCopium">Restart</button>
+        </div>
+      `;
+      copiumScreen.querySelector("#restartButtonCopium").addEventListener("click", debounce(() => {
+        copiumScreen.style.display = "none";
+        resetGame("copiumOverflow");
+        // Handle automation restoration for modal version
+        if (wasAutoRunning && automationMode === "all" && gameState.automation?.resumeOnReset) {
+          setTimeout(() => {
+            gameState.autoRun = true;
+            gameState.automationMode = automationMode;
+            showMessage(`Automation resumed in ${automationMode} mode.`, backgroundColors["perk"]);
+            updateAutomationButtonStyles();
+          }, 100);
+        }
+      }, 2000));
+      const copiumContent = copiumScreen.querySelector("#gameOverContentCopium");
+      let resetMsg = copiumContent.querySelector("#copiumResetMsg");
+      if (!resetMsg) {
+        resetMsg = document.createElement("p");
+        resetMsg.id = "copiumResetMsg";
+        copiumContent.appendChild(resetMsg);
+      }
+      resetMsg.textContent = "This is your " + (gameState.numCopiumResets + 1) + getOrdinalSuffix(gameState.numCopiumResets + 1) + " Copium reset.";
+      copiumScreen.style.display = "flex";
+      if (gameState.soundEnabled) copiumGameOverSound.play();
+      return; // Don't continue with automation logic below
     }
-    resetMsg.textContent = "This is your " +
-      (gameState.numCopiumResets + 1) +
-      getOrdinalSuffix(gameState.numCopiumResets + 1) +
-      " Copium reset.";
-    copiumScreen.style.display = "flex";
-    if (gameState.soundEnabled) copiumGameOverSound.play();
+    
+    // Handle disable auto-use on copium reset
+    if (gameState.automation?.disableAutoUseOnCopiumReset && gameState.autoConsumeEnabled) {
+      gameState.autoConsumeEnabled = false;
+      gameState.automation.energyResetsSinceAutoUseChange = 0; // Reset energy reset counter
+      showMessage("Auto-Use disabled after copium reset!", backgroundColors["resource"]);
+      
+      // Update the button visual state
+      setTimeout(() => {
+        const autoUseButton = document.getElementById("autoConsumeBtn");
+        if (autoUseButton) {
+          autoUseButton.classList.remove("active");
+        }
+      }, 100);
+    }
+    
+
+    
+    // Restore automation state after reset (only if "Resume on Reset" is enabled and it was in "All" mode)
+    if (wasAutoRunning && automationMode === "all" && gameState.automation?.resumeOnReset) {
+      setTimeout(() => {
+        gameState.autoRun = true;
+        gameState.automationMode = automationMode;
+        showMessage(`Automation resumed in ${automationMode} mode.`, backgroundColors["perk"]);
+        updateAutomationButtonStyles();
+      }, 100);
+    }
   }
   
   
 
-  function handleDelusionOverflow() {
-    let delusionScreen = document.getElementById("gameOverScreenDelusion");
-    if (!delusionScreen) {
-      delusionScreen = document.createElement("div");
-      delusionScreen.id = "gameOverScreenDelusion";
-      document.body.appendChild(delusionScreen);
-    }
-    delusionScreen.innerHTML = `
-      <div id="gameOverContentDelusion">
-        <h2>Game Over</h2>
-        <p>Your delusion is over ${gameState.maxDelusion}!</p>
-        <p>You lose 20% of your Power.</p>
-        <button id="restartButtonDelusion">Restart</button>
-      </div>
-    `;
-    delusionScreen.querySelector("#restartButtonDelusion").addEventListener("click", debounce(() => {
-      delusionScreen.style.display = "none";
+  function handleDelusionOverflow(wasAutoRunning = false, automationMode = "zone") {
+    if (gameState.gameMods?.disablePauseOnGameOver) {
+      // Auto-restart immediately without showing popup
+      if (gameState.soundEnabled) delusionGameOverSound.play();
+      showMessage("Game Over: Delusion overflow! Auto-restarting...", backgroundColors["resource"]);
       resetGame("delusionOverflow");
-    }, 2000));
-    const delusionContent = delusionScreen.querySelector("#gameOverContentDelusion");
-    let resetMsg = delusionContent.querySelector("#delusionResetMsg");
-    if (!resetMsg) {
-      resetMsg = document.createElement("p");
-      resetMsg.id = "delusionResetMsg";
-      delusionContent.appendChild(resetMsg);
+    } else {
+      // Original behavior: show modal and wait for user input
+      let delusionScreen = document.getElementById("gameOverScreenDelusion");
+      if (!delusionScreen) {
+        delusionScreen = document.createElement("div");
+        delusionScreen.id = "gameOverScreenDelusion";
+        document.body.appendChild(delusionScreen);
+      }
+      delusionScreen.innerHTML = `
+        <div id="gameOverContentDelusion">
+          <h2>Game Over</h2>
+          <p>Your delusion is over ${gameState.maxDelusion}!</p>
+          <p>You lose 20% of your Power.</p>
+          <button id="restartButtonDelusion">Restart</button>
+        </div>
+      `;
+      delusionScreen.querySelector("#restartButtonDelusion").addEventListener("click", debounce(() => {
+        delusionScreen.style.display = "none";
+        resetGame("delusionOverflow");
+        // Handle automation restoration for modal version
+        if (wasAutoRunning && automationMode === "all" && gameState.automation?.resumeOnReset) {
+          setTimeout(() => {
+            gameState.autoRun = true;
+            gameState.automationMode = automationMode;
+            showMessage(`Automation resumed in ${automationMode} mode.`, backgroundColors["perk"]);
+            updateAutomationButtonStyles();
+          }, 100);
+        }
+      }, 2000));
+      const delusionContent = delusionScreen.querySelector("#gameOverContentDelusion");
+      let resetMsg = delusionContent.querySelector("#delusionResetMsg");
+      if (!resetMsg) {
+        resetMsg = document.createElement("p");
+        resetMsg.id = "delusionResetMsg";
+        delusionContent.appendChild(resetMsg);
+      }
+      resetMsg.textContent = "This is your " + (gameState.numDelusionResets + 1) + getOrdinalSuffix(gameState.numDelusionResets + 1) + " Delusion reset.";
+      delusionScreen.style.display = "flex";
+      if (gameState.soundEnabled) delusionGameOverSound.play();
+      return; // Don't continue with automation logic below
     }
-    resetMsg.textContent = "This is your " +
-      (gameState.numDelusionResets + 1) +
-      getOrdinalSuffix(gameState.numDelusionResets + 1) +
-      " Delusion reset.";
-    delusionScreen.style.display = "flex";
-    if (gameState.soundEnabled) delusionGameOverSound.play();
+    
+    // Restore automation state after reset (only if "Resume on Reset" is enabled and it was in "All" mode)
+    if (wasAutoRunning && automationMode === "all" && gameState.automation?.resumeOnReset) {
+      setTimeout(() => {
+        gameState.autoRun = true;
+        gameState.automationMode = automationMode;
+        showMessage(`Automation resumed in ${automationMode} mode.`, backgroundColors["perk"]);
+        updateAutomationButtonStyles();
+      }, 100);
+    }
   }
   
   
@@ -1598,6 +1861,19 @@
       showMessage("That task is already completed.");
       return;
     }
+
+    // Auto-use Cosmic Shard for a specific action
+    if (
+      gameState.automation?.autoUseCosmicShardForAction &&
+      gameState.autoConsumeEnabled &&
+      task.name === gameState.automation.cosmicShardTargetAction &&
+      gameState.resources.cosmic_shard > 1
+    ) {
+      const shardsToUse = gameState.resources.cosmic_shard - 1;
+      consumeResource("cosmic_shard", shardsToUse);
+      showMessage(`Auto-used ${shardsToUse} Cosmic Shard(s) for starting '${task.name}'.`, backgroundColors.resource);
+    }
+
     const data = {
       zoneIndex,
       taskIndex,
@@ -1607,7 +1883,8 @@
       repContainer,
       progress: 0,
       totalDuration: task.baseTime,
-      paused: false
+      paused: false,
+
     };
     button.classList.add("active");
     currentTasks.push(data);
@@ -1713,13 +1990,13 @@
         }
       }
 
-      if (gameState.perks["simulation_engine"] && gameState.zoneFullCompletes[currentZoneIndex] >= 10) {
+      if (gameState.perks["simulation_engine"]) {
         const key = `${currentZoneIndex}-${idx}`;
         // Ensure a default value is set if none exists:
         if (gameState.automationOverrides[key] === undefined) {
           gameState.automationOverrides[key] = false;
         }
-        // Update the button’s appearance based on the override:
+        // Update the button's appearance based on the override:
         updateTaskAutomationUI(btn, key);
         
         // For mobile: long-press (1s) toggles automation.
@@ -1728,8 +2005,10 @@
         btn.addEventListener("touchstart", (e) => {
           longPressTriggered = false;
           touchTimeout = setTimeout(() => {
-            longPressTriggered = true;
-            toggleTaskAutomation(key, btn, task);
+            if (!gameState.automation?.lockAutomationOrder) {
+              longPressTriggered = true;
+              toggleTaskAutomation(key, btn, task);
+            }
           }, 1000);
         });
         btn.addEventListener("touchend", (e) => {
@@ -1743,7 +2022,9 @@
 
         btn.addEventListener("contextmenu", (e) => {
           e.preventDefault();
-          toggleTaskAutomation(key, btn, task);
+          if (!gameState.automation?.lockAutomationOrder) {
+            toggleTaskAutomation(key, btn, task);
+          }
           return false;
         });
       } else {
@@ -1800,7 +2081,7 @@
       if (typeof gameState.zoneFullCompletes[currentZoneIndex] !== "number") {
         gameState.zoneFullCompletes[currentZoneIndex] = 0;
       }
-      if (gameState.zoneFullCompletes[currentZoneIndex] >= 10) {
+      if (gameState.gameMods?.disable10CompletionRequirement || gameState.zoneFullCompletes[currentZoneIndex] >= 10) { // Show automation UI based on mod or completion count
         zoneAutomationEl.innerHTML = "";
         
         // Label container on its own line.
@@ -1866,8 +2147,9 @@
         if (gameState.serenityUnlockables["Cognitive Cache"]) {
           renderCognitiveCacheButtons();
         }
-      } else {
-        zoneAutomationEl.innerHTML = "Full Completes:<br>" + gameState.zoneFullCompletes[currentZoneIndex] + " / 10";
+        
+        // MOD: Render new automation controls
+        renderAutomationControls(zoneAutomationEl);
       }
     } else {
       zoneAutomationEl.innerHTML = "";
@@ -1977,7 +2259,7 @@
     const zone = zones[currentZoneIndex];
     zone.tasks.forEach((task, idx) => {
       const key = `${currentZoneIndex}-${idx}`;
-      // Find the task’s automation button in the DOM.
+      // Find the task's automation button in the DOM.
       const btn = document.querySelector(`.task[data-zone-index="${currentZoneIndex}"][data-task-index="${idx}"] button`);
       if (btn) {
         updateTaskAutomationUI(btn, key);
@@ -2269,17 +2551,22 @@
 
   function nextZone() {
     currentZoneIndex++;
-    if (gameState.autoRun && gameState.automationMode === "all") {
-      // In "All" mode, if the new zone also qualifies, keep autoRun true.
-      if (typeof gameState.zoneFullCompletes[currentZoneIndex] === "number" &&
-          gameState.zoneFullCompletes[currentZoneIndex] >= 10) {
+    
+    // Check if we should stop automation at the specified zone
+    if (gameState.automation?.stopAutomationAtZone && 
+        gameState.automationMode === "all" && 
+        gameState.autoRun && 
+        currentZoneIndex >= gameState.automation.stopAutomationZoneNumber - 1) {
+      gameState.autoRun = false;
+      gameState.automationMode = "zone";
+      showMessage(`Automation stopped at Zone ${currentZoneIndex + 1} as requested`, backgroundColors["perk"]);
+    } else if (gameState.autoRun && gameState.automationMode === "all") {
+      // In "All" mode, check if we should continue automation based on mod settings
+      if (gameState.gameMods?.disable10CompletionRequirement || (gameState.zoneFullCompletes[currentZoneIndex] >= 10)) {
         gameState.autoRun = true;
       } else {
+        // Original behavior: stop automation if the new zone hasn't been completed 10+ times
         gameState.autoRun = false;
-        showMessage("Automation ended.");
-        if (gameState.soundEnabled) {
-          automationEndSound.play();
-        }
       }
     } else {
       // In "Zone" mode (or if no automation mode set), turn autoRun off.
@@ -2876,8 +3163,6 @@
       } else {
         resourcesContainer.appendChild(autoBtn);
       }
-      
-      gameState.autoConsumeEnabled = false;
 
       // Toggle auto-consume mode on click.
       autoBtn.addEventListener("click", () => {
@@ -2890,6 +3175,13 @@
           showMessage("Resource Auto-Use disabled");
         }
       });
+    }
+
+    // Restore the visual state of the button based on saved state
+    if (gameState.autoConsumeEnabled) {
+      autoBtn.classList.add("active");
+    } else {
+      autoBtn.classList.remove("active");
     }
 
     if (gameState.serenityUnlockables["Resource Guru"]) {
@@ -2974,7 +3266,11 @@
     if (gameState.serenityUnlocked) {
       serenityUpg.style.display = "inline-block";
       // Calculate potential serenity gain on prestige:
-      const serenityGainPotential = ((gameState.bestCompletedZone ** gameState.serenityGainZoneExponent) / gameState.resetsForBestZone) * (gameState.perks.inspired_glow ? 1.5 : 1)  * (1 + (0.01 * gameState.serenityInfusionValue * gameState.highestCompletedZone)) * (gameState.perks.echo_of_nothing ? gameState.perksUnlocked : 1) + gameState.satoshiSerenity;
+      // MOD: Use appropriate divisor based on scaling settings
+      const divisor = gameState.gameMods?.useConstantSerenityScaling 
+        ? gameState.gameMods.serenityGainDivisor 
+        : gameState.resetsForBestZone;
+      const serenityGainPotential = ((gameState.bestCompletedZone ** gameState.serenityGainZoneExponent) / divisor) * (gameState.perks.inspired_glow ? 1.5 : 1)  * (1 + (0.01 * gameState.serenityInfusionValue * gameState.highestCompletedZone)) * (gameState.perks.echo_of_nothing ? gameState.perksUnlocked : 1) + gameState.satoshiSerenity;
       // Set the inner HTML: first line shows current Serenity, second line (in gray) shows potential gain.
       serenityUpg.innerHTML = `Serenity: ${formatNumber(gameState.serenity)}`
       serenityUpg.innerHTML += `<br><span style="color:rgb(200, 200, 200); font-size: 0.9em;">+(${formatNumber(serenityGainPotential)})</span>`;
@@ -3027,19 +3323,29 @@
   function showSerenityPrestigeModal() {
     hideTooltip();
   
-    const serenityGainPotential = ((gameState.bestCompletedZone ** gameState.serenityGainZoneExponent) / gameState.resetsForBestZone) *
+    // MOD: Choose divisor based on scaling settings
+    const divisor = gameState.gameMods.useConstantSerenityScaling 
+      ? gameState.gameMods.serenityGainDivisor 
+      : gameState.resetsForBestZone;
+    
+    const serenityGainPotential = ((gameState.bestCompletedZone ** gameState.serenityGainZoneExponent) / divisor) *
       (gameState.perks.inspired_glow ? 1.5 : 1) * (1 + (0.01 * gameState.serenityInfusionValue * gameState.highestCompletedZone)) * (gameState.perks.echo_of_nothing ? gameState.perksUnlocked : 1)
        + gameState.satoshiSerenity;
   
     // Calculate total resets from energy, copium, and delusion resets.
     const totalResets = gameState.numEnergyResets + gameState.numCopiumResets + gameState.numDelusionResets;
-    // Calculate next zone potential using (highestCompletedZone + 1) divided by total resets.
-    let nextZonePotential = (((gameState.highestCompletedZone + 1) ** gameState.serenityGainZoneExponent) / Math.max(totalResets, 1)) *
+    const nextZoneDivisor = gameState.gameMods.useConstantSerenityScaling 
+      ? gameState.gameMods.serenityGainDivisor 
+      : Math.max(totalResets, 1);
+    let nextZonePotential = (((gameState.highestCompletedZone + 1) ** gameState.serenityGainZoneExponent) / nextZoneDivisor) *
       (gameState.perks.inspired_glow ? 1.5 : 1)  * (1 + (0.01 * gameState.serenityInfusionValue * (gameState.highestCompletedZone + 1))) * (gameState.perks.echo_of_nothing ? gameState.perksUnlocked : 1)
        + gameState.satoshiSerenity;
 
     if (serenityGainPotential > nextZonePotential && gameState.serenityInfusionValue > 0) {
-      nextZonePotential = ((gameState.bestCompletedZone ** gameState.serenityGainZoneExponent) / gameState.resetsForBestZone) *
+      const bestZoneDivisor = gameState.gameMods.useConstantSerenityScaling 
+        ? gameState.gameMods.serenityGainDivisor 
+        : gameState.resetsForBestZone;
+      nextZonePotential = ((gameState.bestCompletedZone ** gameState.serenityGainZoneExponent) / bestZoneDivisor) *
       (gameState.perks.inspired_glow ? 1.5 : 1) * (1 + (0.01 * gameState.serenityInfusionValue * (gameState.highestCompletedZone + 1))) * (gameState.perks.echo_of_nothing ? gameState.perksUnlocked : 1)
        + gameState.satoshiSerenity;
     }
@@ -3081,12 +3387,14 @@
           <span style="color: gray; font-size: 0.9em;">(+${formatNumber(serenityGainPotential)})</span>
         </p>
         <p style="color: gray; margin-top: -10px;">
-          Serenity Gain = (<strong>Best Full Zone</strong> ^ ${gameState.serenityGainZoneExponent} / <strong>Total Resets</strong>)${gameState.perks.inspired_glow ? " * 1.5" : ""}${gameState.serenityInfusionValue > 0 ? " * Infusion(" + gameState.serenityInfusionValue + "% * Highest Zone)" : ""}${gameState.perks.echo_of_nothing ? " * (# perks)" : ""}${gameState.serenityUnlockables["Satoshi's Wallet"] ? " + Wallet(" + formatNumber(gameState.satoshiSerenity) + ")" : ""}
+          Serenity Gain = (<strong>Best Full Zone</strong> ^ ${gameState.serenityGainZoneExponent} / <strong>${gameState.gameMods.useConstantSerenityScaling ? gameState.gameMods.serenityGainDivisor : "Total Resets"}</strong>)${gameState.perks.inspired_glow ? " * 1.5" : ""}${gameState.serenityInfusionValue > 0 ? " * Infusion(" + gameState.serenityInfusionValue + "% * Highest Zone)" : ""}${gameState.perks.echo_of_nothing ? " * (# perks)" : ""}${gameState.serenityUnlockables["Satoshi's Wallet"] ? " + Wallet(" + formatNumber(gameState.satoshiSerenity) + ")" : ""}
         </p>
       </div>
       <p style="font-size: 0.9em; margin-top: 5px;">
         Best Zone Completed: ${gameState.bestCompletedZone} | 
-        Resets on Completion: ${gameState.resetsForBestZone == 1e100 ? "N/A" : gameState.resetsForBestZone}<br>
+        ${gameState.gameMods.useConstantSerenityScaling 
+          ? `Formula Divisor: ${gameState.gameMods.serenityGainDivisor} (constant)` 
+          : `Resets on Completion: ${gameState.resetsForBestZone == 1e100 ? "N/A" : gameState.resetsForBestZone}`}<br>
         <span style="color: gray;">
           Highest Zone Completed: ${gameState.highestCompletedZone} | Zone ${gameState.highestCompletedZone + 1} Potential Serenity: 
           <span style="color: ${nextZonePotential > serenityGainPotential ? "green" : "gray"};">${formatNumber(nextZonePotential)}</span>
@@ -3304,6 +3612,15 @@
       if (serenityGain >= 69000) {
         unlockAchievement("69 K?");
       }
+      
+      // Show the serenity gain message (this happens during prestige when awardSerenityOnDiscovery is disabled)
+      if (!gameState.gameMods?.awardSerenityOnDiscovery) {
+        const divisorDisplay = gameState.gameMods?.useConstantSerenityScaling 
+          ? gameState.gameMods.serenityGainDivisor 
+          : gameState.resetsForBestZone;
+        showMessage(`Serenity Acquired through Prestige!<br>+${formatNumber(serenityGain)} Serenity Points<br>Formula: Zone ${gameState.bestCompletedZone}^${gameState.serenityGainZoneExponent} ÷ ${divisorDisplay}`, backgroundColors["prestige"]);
+      }
+      
       resetGame("prestige");
       confirmModal.remove();
       // Also close the main serenity modal if it's still open
@@ -3417,6 +3734,517 @@
       dBar.style.display = "grid";
     }
     updateDelusionDisplay();
+  }
+
+  /****************************************
+   * GAME MODS UI
+   ****************************************/
+  
+  // Function to create and show the Game Mods modal
+  function showGameModsModal() {
+      const modal = document.createElement("div");
+      modal.id = "gameModsModal";
+      modal.className = "modal";
+  
+      const content = document.createElement("div");
+      content.className = "modal-content";
+      content.innerHTML = `<h2>Game Mods</h2>`;
+  
+      const modsContainer = document.createElement("div");
+      modsContainer.className = "mods-container";
+  
+      // 1. Permanent Automation
+      const permAutoLabel = document.createElement("label");
+      const permAutoCheckbox = document.createElement("input");
+      permAutoCheckbox.type = "checkbox";
+      permAutoCheckbox.checked = gameState.gameMods.permanentAutomation;
+      permAutoCheckbox.addEventListener("change", (e) => {
+          gameState.gameMods.permanentAutomation = e.target.checked;
+          if (e.target.checked) {
+              // MOD: Enable automation perks immediately
+              gameState.perks["self_operating_gadget"] = true;
+              gameState.perks["simulation_engine"] = true;
+              gameState.serenityUnlockables["Smarter Automation"] = true;
+              gameState.serenityUnlockables["Cognitive Cache"] = true;
+              gameState.serenityUnlockables["Resource Consumer"] = true;
+              gameState.serenityUnlockables["Instant Simulation"] = true;
+              gameState.serenityUnlockables["Resource Guru"] = true;
+              renderPerks();
+              applyPerks();
+              displayZone();
+              showMessage("Permanent Automation Enabled.");
+          } else {
+              // MOD: Remove automation perks immediately (player can re-earn them)
+              delete gameState.perks["self_operating_gadget"];
+              delete gameState.perks["simulation_engine"];
+              delete gameState.serenityUnlockables["Smarter Automation"];
+              delete gameState.serenityUnlockables["Cognitive Cache"];
+              delete gameState.serenityUnlockables["Resource Consumer"];
+              delete gameState.serenityUnlockables["Instant Simulation"];
+              delete gameState.serenityUnlockables["Resource Guru"];
+              renderPerks();
+              applyPerks();
+              displayZone();
+              showMessage("Permanent Automation Disabled.");
+          }
+      });
+            permAutoLabel.appendChild(permAutoCheckbox);
+      permAutoLabel.append("Permanently Unlock Automation");
+      modsContainer.appendChild(permAutoLabel);
+
+      // 2. Enable Advanced Automation
+      const enableAdvancedLabel = document.createElement("label");
+      const enableAdvancedCheckbox = document.createElement("input");
+      enableAdvancedCheckbox.type = "checkbox";
+      enableAdvancedCheckbox.checked = gameState.gameMods.enableAdvancedAutomation;
+      enableAdvancedCheckbox.addEventListener("change", (e) => {
+          gameState.gameMods.enableAdvancedAutomation = e.target.checked;
+          if (!e.target.checked) {
+              // Uncheck all advanced automation options
+              gameState.automation.resumeOnReset = false;
+              gameState.automation.autoApplyArmor = false;
+                  gameState.automation.disableAutoUseOnCopiumReset = false;
+    gameState.automation.enableAutoUseAfterEnergyResets = false;
+    gameState.automation.disableAutoUseAfterEnergyResets = false;
+    gameState.automation.lockAutomationOrder = false;
+    gameState.automation.autoUseGauntletOnReset = false;
+    gameState.automation.autoUseGauntletWhenEven = false;
+    gameState.automation.autoUseGauntletAllButOne = false;
+    gameState.automation.autoUseStardustOnReset = false;
+    gameState.automation.stopAutomationAtZone = false;
+          }
+          // Re-render the zone display to update automation controls visibility
+          displayZone();
+          showMessage(`Advanced Automation ${e.target.checked ? "Enabled" : "Disabled"}.`);
+      });
+      enableAdvancedLabel.appendChild(enableAdvancedCheckbox);
+      enableAdvancedLabel.append("Enable Advanced Automation");
+      modsContainer.appendChild(enableAdvancedLabel);
+
+            // 3. Award Serenity on Discovery
+      const awardSerenityLabel = document.createElement("label");
+      const awardSerenityCheckbox = document.createElement("input");
+      awardSerenityCheckbox.type = "checkbox";
+      awardSerenityCheckbox.checked = gameState.gameMods.awardSerenityOnDiscovery;
+      awardSerenityCheckbox.addEventListener("change", (e) => {
+          gameState.gameMods.awardSerenityOnDiscovery = e.target.checked;
+          showSerenityIfUnlocked(); // Update UI
+      });
+      awardSerenityLabel.appendChild(awardSerenityCheckbox);
+      awardSerenityLabel.append("Award Serenity on Discovery");
+      modsContainer.appendChild(awardSerenityLabel);
+
+      // 4. Use Constant Serenity Scaling Factor
+      const constantSerenityLabel = document.createElement("label");
+      const constantSerenityCheckbox = document.createElement("input");
+      constantSerenityCheckbox.type = "checkbox";
+      constantSerenityCheckbox.checked = gameState.gameMods.useConstantSerenityScaling;
+      constantSerenityCheckbox.addEventListener("change", (e) => {
+          gameState.gameMods.useConstantSerenityScaling = e.target.checked;
+          showMessage(`Use Constant Serenity Scaling ${e.target.checked ? "Enabled" : "Disabled"}.`);
+          showSerenityIfUnlocked(); // Update UI
+      });
+      constantSerenityLabel.appendChild(constantSerenityCheckbox);
+      constantSerenityLabel.append("Use Constant Serenity Scaling Factor");
+      modsContainer.appendChild(constantSerenityLabel);
+
+      // 5. Serenity Scaling Factor
+      const serenityDivisorLabel = document.createElement("label");
+      const serenityDivisorInput = document.createElement("input");
+      serenityDivisorInput.type = "number";
+      serenityDivisorInput.value = gameState.gameMods.serenityGainDivisor;
+      serenityDivisorInput.addEventListener("change", (e) => {
+          const val = parseInt(e.target.value, 10);
+          if (!isNaN(val) && val > 0) {
+              gameState.gameMods.serenityGainDivisor = val;
+              showSerenityIfUnlocked(); // Update UI
+          } else {
+              e.target.value = gameState.gameMods.serenityGainDivisor; // Revert if invalid
+          }
+      });
+      serenityDivisorLabel.append("Serenity Scaling Factor: ");
+      serenityDivisorLabel.appendChild(serenityDivisorInput);
+      modsContainer.appendChild(serenityDivisorLabel);
+
+      // 6. Disable Pause on Game Over
+      const disablePauseLabel = document.createElement("label");
+      const disablePauseCheckbox = document.createElement("input");
+      disablePauseCheckbox.type = "checkbox";
+      disablePauseCheckbox.checked = gameState.gameMods.disablePauseOnGameOver;
+      disablePauseCheckbox.addEventListener("change", (e) => {
+          gameState.gameMods.disablePauseOnGameOver = e.target.checked;
+          showMessage(`Disable Pause on Game Over ${e.target.checked ? "Enabled" : "Disabled"}.`);
+      });
+      disablePauseLabel.appendChild(disablePauseCheckbox);
+      disablePauseLabel.append("Disable Pause on Game Over");
+      modsContainer.appendChild(disablePauseLabel);
+
+      // 7. Disable Serenity Unlocked Modal
+      const disableSerenityModalLabel = document.createElement("label");
+      const disableSerenityModalCheckbox = document.createElement("input");
+      disableSerenityModalCheckbox.type = "checkbox";
+      disableSerenityModalCheckbox.checked = gameState.gameMods.disableSerenityUnlockedModal;
+      disableSerenityModalCheckbox.addEventListener("change", (e) => {
+          gameState.gameMods.disableSerenityUnlockedModal = e.target.checked;
+          showMessage(`Disable Serenity Unlocked Modal ${e.target.checked ? "Enabled" : "Disabled"}.`);
+      });
+      disableSerenityModalLabel.appendChild(disableSerenityModalCheckbox);
+      disableSerenityModalLabel.append("Disable Serenity Unlocked Modal");
+      modsContainer.appendChild(disableSerenityModalLabel);
+
+      // 8. Disable 10 Completion Requirement
+      const disable10CompletionLabel = document.createElement("label");
+      const disable10CompletionCheckbox = document.createElement("input");
+      disable10CompletionCheckbox.type = "checkbox";
+      disable10CompletionCheckbox.checked = gameState.gameMods.disable10CompletionRequirement;
+      disable10CompletionCheckbox.addEventListener("change", (e) => {
+          gameState.gameMods.disable10CompletionRequirement = e.target.checked;
+          displayZone(); // Re-render zone to update automation UI
+          showMessage(`Disable 10 Completion Requirement ${e.target.checked ? "Enabled" : "Disabled"}.`);
+      });
+      disable10CompletionLabel.appendChild(disable10CompletionCheckbox);
+      disable10CompletionLabel.append("Disable 10 Completion Requirement");
+      modsContainer.appendChild(disable10CompletionLabel);
+  
+      content.appendChild(modsContainer);
+  
+      const backBtn = document.createElement("button");
+      backBtn.textContent = "Back";
+      backBtn.classList.add("btn-green");
+      backBtn.addEventListener("click", () => modal.remove());
+      content.appendChild(backBtn);
+  
+      modal.appendChild(content);
+      document.body.appendChild(modal);
+  }
+
+  function renderAutomationControls(container) {
+      // Only render advanced automation controls if enabled
+      if (!gameState.gameMods?.enableAdvancedAutomation) {
+          // Remove any existing automation controls container to match game-v1.js behavior
+          const existingContainer = document.getElementById("automationControls");
+          if (existingContainer) {
+              existingContainer.remove();
+          }
+          return;
+      }
+      
+      let controlsContainer = document.getElementById("automationControls");
+      if (!controlsContainer) {
+          controlsContainer = document.createElement("div");
+          controlsContainer.id = "automationControls";
+          container.appendChild(controlsContainer);
+      }
+      controlsContainer.innerHTML = ""; // Clear existing
+      
+      // Create collapsible header
+      const headerDiv = document.createElement("div");
+      headerDiv.style.cursor = "pointer";
+      headerDiv.style.background = "#2a2a2a";
+      headerDiv.style.padding = "5px 10px";
+      headerDiv.style.borderRadius = "5px";
+      headerDiv.style.marginBottom = "5px";
+      headerDiv.style.display = "flex";
+      headerDiv.style.justifyContent = "space-between";
+      headerDiv.style.alignItems = "center";
+      
+      const headerText = document.createElement("span");
+      headerText.textContent = "Automation Settings";
+      headerText.style.fontWeight = "bold";
+      headerText.style.color = "#fff";
+      
+      const toggleIcon = document.createElement("span");
+      // Initialize collapsed state if not set
+      if (gameState.automationCollapsed === undefined) {
+          gameState.automationCollapsed = true; // Default to collapsed
+      }
+      toggleIcon.textContent = gameState.automationCollapsed ? "▶" : "▼";
+      toggleIcon.style.fontSize = "12px";
+      toggleIcon.style.color = "#fff";
+      
+      headerDiv.appendChild(headerText);
+      headerDiv.appendChild(toggleIcon);
+      controlsContainer.appendChild(headerDiv);
+      
+      // Create collapsible content container
+      const contentDiv = document.createElement("div");
+      contentDiv.id = "automationContent";
+      contentDiv.style.display = gameState.automationCollapsed ? "none" : "block";
+      controlsContainer.appendChild(contentDiv);
+      
+      // Add click event to toggle
+      headerDiv.addEventListener("click", () => {
+          gameState.automationCollapsed = !gameState.automationCollapsed;
+          contentDiv.style.display = gameState.automationCollapsed ? "none" : "block";
+          toggleIcon.textContent = gameState.automationCollapsed ? "▶" : "▼";
+             });
+   
+      // --- Lock Automation Order ---
+      const lockAutomationLabel = document.createElement('label');
+      const lockAutomationCheckbox = document.createElement('input');
+      lockAutomationCheckbox.type = 'checkbox';
+      lockAutomationCheckbox.checked = gameState.automation.lockAutomationOrder;
+      lockAutomationCheckbox.addEventListener('change', () => {
+          gameState.automation.lockAutomationOrder = lockAutomationCheckbox.checked;
+          if (lockAutomationCheckbox.checked) {
+              showMessage("Automation order locked - right-click/long-press to change automation disabled", backgroundColors["perk"]);
+          } else {
+              showMessage("Automation order unlocked - right-click/long-press to change automation enabled", backgroundColors["perk"]);
+          }
+      });
+      lockAutomationLabel.appendChild(lockAutomationCheckbox);
+      lockAutomationLabel.append(' Lock Automation Order');
+      contentDiv.appendChild(lockAutomationLabel);
+
+      // --- Resume on Reset ---
+      const resumeLabel = document.createElement('label');
+      const resumeCheckbox = document.createElement('input');
+      resumeCheckbox.type = 'checkbox';
+      resumeCheckbox.checked = gameState.automation.resumeOnReset;
+      resumeCheckbox.addEventListener('change', () => gameState.automation.resumeOnReset = resumeCheckbox.checked);
+      resumeLabel.appendChild(resumeCheckbox);
+      resumeLabel.append(' Resume on Reset');
+      contentDiv.appendChild(resumeLabel);
+  
+      // --- Auto Apply Armor ---
+      const armorLabel = document.createElement('label');
+      const armorCheckbox = document.createElement('input');
+      armorCheckbox.type = 'checkbox';
+      armorCheckbox.checked = gameState.automation.autoApplyArmor;
+      armorCheckbox.addEventListener('change', () => gameState.automation.autoApplyArmor = armorCheckbox.checked);
+      armorLabel.appendChild(armorCheckbox);
+      armorLabel.append(' Auto-apply Armor');
+      contentDiv.appendChild(armorLabel);
+  
+            // --- Disable Auto-use on Copium Reset ---
+      const disableOnCopiumLabel = document.createElement('label');
+      const disableOnCopiumCheckbox = document.createElement('input');
+      disableOnCopiumCheckbox.type = 'checkbox';
+      disableOnCopiumCheckbox.checked = gameState.automation.disableAutoUseOnCopiumReset;
+      disableOnCopiumCheckbox.addEventListener('change', () => {
+          gameState.automation.disableAutoUseOnCopiumReset = disableOnCopiumCheckbox.checked;
+      });
+      disableOnCopiumLabel.appendChild(disableOnCopiumCheckbox);
+      disableOnCopiumLabel.append(' Disable Auto-use on Copium Reset');
+      contentDiv.appendChild(disableOnCopiumLabel);
+
+      // --- Enable Auto-use after Energy Resets ---
+      const enableAfterEnergyDiv = document.createElement('div');
+      const enableAfterEnergyLabel = document.createElement('label');
+      const enableAfterEnergyCheckbox = document.createElement('input');
+      enableAfterEnergyCheckbox.type = 'checkbox';
+      enableAfterEnergyCheckbox.checked = gameState.automation.enableAutoUseAfterEnergyResets;
+      enableAfterEnergyLabel.appendChild(enableAfterEnergyCheckbox);
+      enableAfterEnergyLabel.append(' Enable Auto-use after Energy Resets');
+      
+      const enableResetsInput = document.createElement('input');
+      enableResetsInput.type = 'number';
+      enableResetsInput.value = gameState.automation.enableAutoUseResetCount;
+      enableResetsInput.style.width = '50px';
+      enableResetsInput.style.display = gameState.automation.enableAutoUseAfterEnergyResets ? 'inline-block' : 'none';
+      enableResetsInput.addEventListener('change', () => {
+          const val = parseInt(enableResetsInput.value, 10);
+          if (!isNaN(val) && val > 0) {
+              gameState.automation.enableAutoUseResetCount = val;
+          } else {
+              enableResetsInput.value = gameState.automation.enableAutoUseResetCount;
+          }
+      });
+
+      enableAfterEnergyCheckbox.addEventListener('change', () => {
+          gameState.automation.enableAutoUseAfterEnergyResets = enableAfterEnergyCheckbox.checked;
+          enableResetsInput.style.display = enableAfterEnergyCheckbox.checked ? 'inline-block' : 'none';
+      });
+
+      enableAfterEnergyDiv.appendChild(enableAfterEnergyLabel);
+      enableAfterEnergyDiv.appendChild(enableResetsInput);
+      contentDiv.appendChild(enableAfterEnergyDiv);
+
+      // --- Disable Auto-use after Energy Resets ---
+      const disableAfterEnergyDiv = document.createElement('div');
+      const disableAfterEnergyLabel = document.createElement('label');
+      const disableAfterEnergyCheckbox = document.createElement('input');
+      disableAfterEnergyCheckbox.type = 'checkbox';
+      disableAfterEnergyCheckbox.checked = gameState.automation.disableAutoUseAfterEnergyResets;
+      disableAfterEnergyLabel.appendChild(disableAfterEnergyCheckbox);
+      disableAfterEnergyLabel.append(' Disable Auto-use after Energy Resets');
+      
+      const disableResetsInput = document.createElement('input');
+      disableResetsInput.type = 'number';
+      disableResetsInput.value = gameState.automation.disableAutoUseResetCount;
+      disableResetsInput.style.width = '50px';
+      disableResetsInput.style.display = gameState.automation.disableAutoUseAfterEnergyResets ? 'inline-block' : 'none';
+      disableResetsInput.addEventListener('change', () => {
+          const val = parseInt(disableResetsInput.value, 10);
+          if (!isNaN(val) && val > 0) {
+              gameState.automation.disableAutoUseResetCount = val;
+          } else {
+              disableResetsInput.value = gameState.automation.disableAutoUseResetCount;
+          }
+      });
+
+      disableAfterEnergyCheckbox.addEventListener('change', () => {
+          gameState.automation.disableAutoUseAfterEnergyResets = disableAfterEnergyCheckbox.checked;
+          disableResetsInput.style.display = disableAfterEnergyCheckbox.checked ? 'inline-block' : 'none';
+      });
+
+      disableAfterEnergyDiv.appendChild(disableAfterEnergyLabel);
+      disableAfterEnergyDiv.appendChild(disableResetsInput);
+      contentDiv.appendChild(disableAfterEnergyDiv);
+
+  
+      // --- Auto-use All Gauntlets on Reset ---
+      const gauntletResetLabel = document.createElement('label');
+      const gauntletResetCheckbox = document.createElement('input');
+      gauntletResetCheckbox.type = 'checkbox';
+      gauntletResetCheckbox.checked = gameState.automation.autoUseGauntletOnReset;
+      gauntletResetCheckbox.addEventListener('change', () => gameState.automation.autoUseGauntletOnReset = gauntletResetCheckbox.checked);
+      gauntletResetLabel.appendChild(gauntletResetCheckbox);
+      gauntletResetLabel.append(' Auto-use All Gauntlets on Reset');
+      contentDiv.appendChild(gauntletResetLabel);
+
+      // --- Auto-use One Gauntlet when Even ---
+      const gauntletEvenLabel = document.createElement('label');
+      const gauntletEvenCheckbox = document.createElement('input');
+      gauntletEvenCheckbox.type = 'checkbox';
+      gauntletEvenCheckbox.checked = gameState.automation.autoUseGauntletWhenEven;
+      gauntletEvenCheckbox.addEventListener('change', () => gameState.automation.autoUseGauntletWhenEven = gauntletEvenCheckbox.checked);
+      gauntletEvenLabel.appendChild(gauntletEvenCheckbox);
+      gauntletEvenLabel.append(' Auto-use One Gauntlet when Even');
+      contentDiv.appendChild(gauntletEvenLabel);
+
+      // --- Auto-use All but One Gauntlet on Acquisition ---
+      const gauntletAllButOneLabel = document.createElement('label');
+      const gauntletAllButOneCheckbox = document.createElement('input');
+      gauntletAllButOneCheckbox.type = 'checkbox';
+      gauntletAllButOneCheckbox.checked = gameState.automation.autoUseGauntletAllButOne;
+      gauntletAllButOneCheckbox.addEventListener('change', () => gameState.automation.autoUseGauntletAllButOne = gauntletAllButOneCheckbox.checked);
+      gauntletAllButOneLabel.appendChild(gauntletAllButOneCheckbox);
+      gauntletAllButOneLabel.append(' Auto-use All but One Gauntlet on Acquisition');
+      contentDiv.appendChild(gauntletAllButOneLabel);
+  
+            // --- Auto-use Stardust on Reset ---
+      const stardustResetDiv = document.createElement('div');
+      const stardustResetLabel = document.createElement('label');
+      const stardustResetCheckbox = document.createElement('input');
+      stardustResetCheckbox.type = 'checkbox';
+      stardustResetCheckbox.checked = gameState.automation.autoUseStardustOnReset;
+      stardustResetLabel.appendChild(stardustResetCheckbox);
+      stardustResetLabel.append(' Auto-use Stardust on Reset');
+
+      const stardustResetSelect = document.createElement('select');
+      stardustResetSelect.style.display = gameState.automation.autoUseStardustOnReset ? 'inline-block' : 'none';
+      // For stardust, exclude fewer items since it's used strategically on reset
+      const EXCLUDED_STARDUST_RESOURCES = new Set(["infinity_gauntlet", "stardust", "googol", "radiance", "master_ball", "rinnegan"]);
+      const stardustResetOptions = Object.keys(resourceActions).filter(r => !EXCLUDED_STARDUST_RESOURCES.has(r));
+      stardustResetOptions.forEach(res => {
+          const option = document.createElement('option');
+          option.value = res;
+          option.textContent = formatStringForDisplay(res);
+          if (res === gameState.automation.stardustResetResource) {
+              option.selected = true;
+          }
+          stardustResetSelect.appendChild(option);
+      });
+      stardustResetSelect.addEventListener('change', () => gameState.automation.stardustResetResource = stardustResetSelect.value);
+
+      stardustResetCheckbox.addEventListener('change', () => {
+          gameState.automation.autoUseStardustOnReset = stardustResetCheckbox.checked;
+          stardustResetSelect.style.display = stardustResetCheckbox.checked ? 'inline-block' : 'none';
+      });
+      
+      stardustResetDiv.appendChild(stardustResetLabel);
+      stardustResetDiv.appendChild(stardustResetSelect);
+      contentDiv.appendChild(stardustResetDiv);
+
+      // --- Auto-use Cosmic Shard for Action ---
+      const cosmicShardActionDiv = document.createElement('div');
+      const cosmicShardActionLabel = document.createElement('label');
+      const cosmicShardActionCheckbox = document.createElement('input');
+      cosmicShardActionCheckbox.type = 'checkbox';
+      cosmicShardActionCheckbox.checked = gameState.automation.autoUseCosmicShardForAction;
+      cosmicShardActionLabel.appendChild(cosmicShardActionCheckbox);
+      cosmicShardActionLabel.append(' Auto-use Cosmic Shard for Action');
+
+      const cosmicShardActionSelect = document.createElement('select');
+      cosmicShardActionSelect.style.display = gameState.automation.autoUseCosmicShardForAction ? 'inline-block' : 'none';
+      
+      // Create a default option
+      const defaultOption = document.createElement('option');
+      defaultOption.value = "";
+      defaultOption.textContent = "Select Action...";
+      cosmicShardActionSelect.appendChild(defaultOption);
+
+      // Get all unique task names from all zones
+      const allTaskNames = new Set();
+      zones.forEach(zone => {
+          zone.tasks.forEach(task => {
+              // Include all task types - Training, Travel, and Prestige
+              allTaskNames.add(task.name);
+          });
+      });
+
+      // Add task names to dropdown, sorted alphabetically
+      Array.from(allTaskNames).sort().forEach(taskName => {
+          const option = document.createElement('option');
+          option.value = taskName;
+          option.textContent = taskName;
+          if (taskName === gameState.automation.cosmicShardTargetAction) {
+              option.selected = true;
+          }
+          cosmicShardActionSelect.appendChild(option);
+      });
+
+      cosmicShardActionSelect.addEventListener('change', () => {
+          gameState.automation.cosmicShardTargetAction = cosmicShardActionSelect.value;
+      });
+
+      cosmicShardActionCheckbox.addEventListener('change', () => {
+          gameState.automation.autoUseCosmicShardForAction = cosmicShardActionCheckbox.checked;
+          cosmicShardActionSelect.style.display = cosmicShardActionCheckbox.checked ? 'inline-block' : 'none';
+      });
+      
+      cosmicShardActionDiv.appendChild(cosmicShardActionLabel);
+      cosmicShardActionDiv.appendChild(cosmicShardActionSelect);
+      contentDiv.appendChild(cosmicShardActionDiv);
+
+      // --- Stop Automation at Zone # ---
+      const stopAtZoneDiv = document.createElement('div');
+      const stopAtZoneLabel = document.createElement('label');
+      const stopAtZoneCheckbox = document.createElement('input');
+      stopAtZoneCheckbox.type = 'checkbox';
+      stopAtZoneCheckbox.checked = gameState.automation.stopAutomationAtZone;
+      stopAtZoneLabel.appendChild(stopAtZoneCheckbox);
+      stopAtZoneLabel.append(' Stop Automation at Zone #');
+
+      const stopAtZoneSelect = document.createElement('select');
+      stopAtZoneSelect.style.display = gameState.automation.stopAutomationAtZone ? 'inline-block' : 'none';
+      
+      // Add zone options (zones are 1-indexed in the game)
+      for (let i = 1; i <= zones.length; i++) {
+          const option = document.createElement('option');
+          option.value = i.toString();
+          option.textContent = `Zone ${i}`;
+          if (i === gameState.automation.stopAutomationZoneNumber) {
+              option.selected = true;
+          }
+          stopAtZoneSelect.appendChild(option);
+      }
+
+      stopAtZoneSelect.addEventListener('change', () => {
+          gameState.automation.stopAutomationZoneNumber = parseInt(stopAtZoneSelect.value, 10);
+      });
+
+      stopAtZoneCheckbox.addEventListener('change', () => {
+          gameState.automation.stopAutomationAtZone = stopAtZoneCheckbox.checked;
+          stopAtZoneSelect.style.display = stopAtZoneCheckbox.checked ? 'inline-block' : 'none';
+      });
+      
+      stopAtZoneDiv.appendChild(stopAtZoneLabel);
+      stopAtZoneDiv.appendChild(stopAtZoneSelect);
+      contentDiv.appendChild(stopAtZoneDiv);
+
+
   }
 
   /****************************************
@@ -3670,6 +4498,22 @@
       });
       content.appendChild(achievementsBtn);
 
+      /**
+       * Game Mods button (Purple) - Between Achievements and Full Restart
+       */
+      const gameModsBtn = document.createElement("button");
+      gameModsBtn.classList.add("btn-purple");
+      gameModsBtn.textContent = "Game Mods";
+      gameModsBtn.setAttribute(
+        "data-tooltip",
+        "Modify core game mechanics."
+      );
+      gameModsBtn.addEventListener("click", () => {
+        showGameModsModal();
+        updateBookwormAchievement("buyMeACoffee");
+      });
+      content.appendChild(gameModsBtn);
+
       // Full Restart button
       const restartAll = document.createElement("button");
       restartAll.classList.add("btn-red");
@@ -3712,7 +4556,7 @@
       content.appendChild(discordBtn);
 
       /**
-       * New Buy Me a Coffee button (Yellow).
+       * Buy Me a Coffee button (Yellow).
        */
       const coffeeBtn = document.createElement("button");
       coffeeBtn.classList.add("btn-yellow");
@@ -4004,9 +4848,12 @@
       if (gameState.energy <= 0) {
         gameState.energy = 0;
         updateEnergyDisplay();
+        // Store automation state before clearing it
+        const wasAutoRunning = gameState.autoRun;
+        const automationMode = gameState.automationMode;
         gameState.autoRun = false;
         currentTasks = [];
-        handleGameOver();
+        handleGameOver(wasAutoRunning, automationMode);
         return;
       }
       const baseXP = delta * xpScale;
@@ -4093,8 +4940,11 @@
 
           if (gameState.copium > 9000) {
             currentTasks = [];
+            // Store automation state before clearing it
+            const wasAutoRunning = gameState.autoRun;
+            const automationMode = gameState.automationMode;
             gameState.autoRun = false;
-            handleCopiumOverflow();
+            handleCopiumOverflow(wasAutoRunning, automationMode);
             return;
           }
           updateCopiumDisplay();
@@ -4129,8 +4979,11 @@
           }
           if (gameState.delusion > gameState.maxDelusion) {
             currentTasks = [];
+            // Store automation state before clearing it
+            const wasAutoRunning = gameState.autoRun;
+            const automationMode = gameState.automationMode;
             gameState.autoRun = false;
-            handleDelusionOverflow();
+            handleDelusionOverflow(wasAutoRunning, automationMode);
             return;
           }
           
@@ -4163,7 +5016,14 @@
             if (gameState.highestCompletedZone < tData.zoneIndex + 1) {
               gameState.highestCompletedZone = tData.zoneIndex + 1;
               gameState.resetsForHighestZone = Math.max(gameState.numEnergyResets + gameState.numCopiumResets + gameState.numDelusionResets, 1);
-              if (gameState.bestCompletedZone ** gameState.serenityGainZoneExponent / gameState.resetsForBestZone < gameState.highestCompletedZone ** gameState.serenityGainZoneExponent / gameState.resetsForHighestZone) {
+              // MOD: Use appropriate divisor for zone comparison
+              const currentDivisor = (gameState.gameMods?.awardSerenityOnDiscovery && gameState.gameMods?.useConstantSerenityScaling) 
+                ? gameState.gameMods.serenityGainDivisor 
+                : gameState.resetsForBestZone;
+              const newDivisor = (gameState.gameMods?.awardSerenityOnDiscovery && gameState.gameMods?.useConstantSerenityScaling) 
+                ? gameState.gameMods.serenityGainDivisor 
+                : gameState.resetsForHighestZone;
+              if (gameState.bestCompletedZone ** gameState.serenityGainZoneExponent / currentDivisor < gameState.highestCompletedZone ** gameState.serenityGainZoneExponent / newDivisor) {
                 gameState.bestCompletedZone = gameState.highestCompletedZone;
                 gameState.resetsForBestZone = gameState.resetsForHighestZone;
                 showMessage(`<span style="color: rgb(28, 106, 233);">New best fully compeleted: Zone ${gameState.bestCompletedZone} with ${gameState.resetsForBestZone} resets</span>`);
@@ -4193,7 +5053,11 @@
                 showPowerIfUnlocked();
               }
               if (Math.random() < 0.025) {
-                const serenityGainPotential = ((gameState.bestCompletedZone ** gameState.serenityGainZoneExponent) / gameState.resetsForBestZone)
+                // MOD: Use appropriate divisor for Satoshi's Wallet serenity calculation
+                const divisor = (gameState.gameMods?.awardSerenityOnDiscovery && gameState.gameMods?.useConstantSerenityScaling) 
+                  ? gameState.gameMods.serenityGainDivisor 
+                  : gameState.resetsForBestZone;
+                const serenityGainPotential = ((gameState.bestCompletedZone ** gameState.serenityGainZoneExponent) / divisor)
                 gameState.satoshiSerenity += serenityGainPotential * 0.025;
                 showMessage(`Satoshi's Wallet: +${formatNumber(serenityGainPotential * 0.025)} Wallet Serenity`);
                 showSerenityIfUnlocked();
@@ -4245,6 +5109,7 @@
             }
           }
 
+          // Deactivate armor since we're clearing all tasks
           gameState.cyberneticArmorTaskRunning = false;
           gameState.cosmicShardTaskRunning = false;
           updateActiveResourcesOverlay();
@@ -4384,19 +5249,154 @@
           saveGameProgress();
           if (gameState.soundEnabled) perkUnlockSound.play();
         }
-        // If the task is a Prestige task and it’s now fully completed, show the prestige modal.
+        // If the task is a Prestige task and it's now fully completed, show the prestige modal.
         if (task.type === "Prestige" && task.count >= task.maxReps) {
-          if (task.name === "Embrace Stillness" && !gameState.secondSectionUnlocked) {
-            gameState.secondSectionUnlocked = true;
-            showMessage("Second prestige section unlocked!", backgroundColors["prestige"]);
-          } else if (task.name === "Transcend Chaos" && !gameState.thirdSectionUnlocked) {
-            gameState.thirdSectionUnlocked = true;
-            showMessage("Third prestige section unlocked!", backgroundColors["prestige"]);
-          }
-          if(!gameState.prestigeAvailable){
-            if(gameState.serenity < 100) {
-              showSerenityUnlockedModal();
+          if (task.name === "Discover Serenity") {
+            // MOD: Award serenity immediately only if "Award Serenity on Discovery" is enabled
+            if (gameState.gameMods?.awardSerenityOnDiscovery) {
+              // Use appropriate divisor based on game mods settings
+              const divisor = gameState.gameMods?.useConstantSerenityScaling 
+                ? gameState.gameMods.serenityGainDivisor 
+                : gameState.resetsForBestZone;
+              const serenityGain = ((gameState.bestCompletedZone ** gameState.serenityGainZoneExponent) / divisor) *
+                (gameState.perks.inspired_glow ? 1.5 : 1) * 
+                (1 + (0.01 * gameState.serenityInfusionValue * gameState.highestCompletedZone)) * 
+                (gameState.perks.echo_of_nothing ? gameState.perksUnlocked : 1) + 
+                gameState.satoshiSerenity;
+              
+              gameState.serenity += serenityGain;
+              gameState.numPrestiges++;
+              
+              // Check for achievements
+              if (gameState.numPrestiges === 1) {
+                unlockAchievement("First Prestige");
+              }
+              if (gameState.numPrestiges >= 420) {
+                unlockAchievement("420");
+              }
+              if (serenityGain >= 69000) {
+                unlockAchievement("69 K?");
+              }
+              
+              const divisorDisplay = gameState.gameMods?.useConstantSerenityScaling 
+                ? gameState.gameMods.serenityGainDivisor 
+                : gameState.resetsForBestZone;
+              showMessage(`Serenity Discovered!<br>+${formatNumber(serenityGain)} Serenity Points<br>Formula: Zone ${gameState.bestCompletedZone}^${gameState.serenityGainZoneExponent} ÷ ${divisorDisplay}`, backgroundColors["prestige"]);
+              
+              showSerenityIfUnlocked();
+            } else {
+              // Original game-v1.js behavior: just show completion message, no serenity awarded yet
+              showMessage("Serenity Discovered!<br>You may now prestige to gain Serenity points.", backgroundColors["prestige"]);
+              // Fix: Make sure to call showSerenityUnlockedModal and set prestigeAvailable for the first task
+              if (!gameState.gameMods?.disableSerenityUnlockedModal && gameState.serenity < 100) {
+                showSerenityUnlockedModal();
+              }
+              gameState.prestigeAvailable = true;
             }
+            
+          } else if (task.name === "Embrace Stillness") {
+            // MOD: Award serenity immediately only if "Award Serenity on Discovery" is enabled (2x multiplier)
+            if (gameState.gameMods?.awardSerenityOnDiscovery) {
+              // Use appropriate divisor based on game mods settings
+              const divisor = gameState.gameMods?.useConstantSerenityScaling 
+                ? gameState.gameMods.serenityGainDivisor 
+                : gameState.resetsForBestZone;
+              const baseSerenityGain = ((gameState.bestCompletedZone ** gameState.serenityGainZoneExponent) / divisor) *
+                (gameState.perks.inspired_glow ? 1.5 : 1) * 
+                (1 + (0.01 * gameState.serenityInfusionValue * gameState.highestCompletedZone)) * 
+                (gameState.perks.echo_of_nothing ? gameState.perksUnlocked : 1) + 
+                gameState.satoshiSerenity;
+              
+              const serenityGain = baseSerenityGain * 2; // 2x multiplier for Embrace Stillness
+              gameState.serenity += serenityGain;
+              gameState.numPrestiges++;
+              
+              // Check for achievements
+              if (gameState.numPrestiges === 1) {
+                unlockAchievement("First Prestige");
+              }
+              if (gameState.numPrestiges >= 420) {
+                unlockAchievement("420");
+              }
+              if (serenityGain >= 69000) {
+                unlockAchievement("69 K?");
+              }
+              
+              const divisorDisplay = gameState.gameMods?.useConstantSerenityScaling 
+                ? gameState.gameMods.serenityGainDivisor 
+                : gameState.resetsForBestZone;
+              showMessage(`Stillness Embraced!<br>+${formatNumber(serenityGain)} Serenity Points (2x bonus)<br>Formula: (Zone ${gameState.bestCompletedZone}^${gameState.serenityGainZoneExponent} ÷ ${divisorDisplay}) × 2`, backgroundColors["prestige"]);
+              
+              showSerenityIfUnlocked();
+            } else {
+              // Original behavior: just show completion message, no serenity awarded yet
+              showMessage("Stillness Embraced!<br>You may now prestige to gain Serenity points.", backgroundColors["prestige"]);
+              // Fix: Make sure to call showSerenityUnlockedModal if the option is enabled
+              if (!gameState.gameMods?.disableSerenityUnlockedModal && gameState.serenity < 100) {
+                showSerenityUnlockedModal();
+              }
+              gameState.prestigeAvailable = true;
+            }
+            
+            if (!gameState.secondSectionUnlocked) {
+              gameState.secondSectionUnlocked = true;
+              showMessage("Second prestige section unlocked!", backgroundColors["prestige"]);
+            }
+          } else if (task.name === "Transcend Chaos") {
+            // MOD: Award serenity immediately only if "Award Serenity on Discovery" is enabled (4x multiplier)
+            if (gameState.gameMods?.awardSerenityOnDiscovery) {
+              // Use appropriate divisor based on game mods settings
+              const divisor = gameState.gameMods?.useConstantSerenityScaling 
+                ? gameState.gameMods.serenityGainDivisor 
+                : gameState.resetsForBestZone;
+              const baseSerenityGain = ((gameState.bestCompletedZone ** gameState.serenityGainZoneExponent) / divisor) *
+                (gameState.perks.inspired_glow ? 1.5 : 1) * 
+                (1 + (0.01 * gameState.serenityInfusionValue * gameState.highestCompletedZone)) * 
+                (gameState.perks.echo_of_nothing ? gameState.perksUnlocked : 1) + 
+                gameState.satoshiSerenity;
+              
+              const serenityGain = baseSerenityGain * 4; // 4x multiplier for Transcend Chaos
+              gameState.serenity += serenityGain;
+              gameState.numPrestiges++;
+              
+              // Check for achievements
+              if (gameState.numPrestiges === 1) {
+                unlockAchievement("First Prestige");
+              }
+              if (gameState.numPrestiges >= 420) {
+                unlockAchievement("420");
+              }
+              if (serenityGain >= 69000) {
+                unlockAchievement("69 K?");
+              }
+              
+              const divisorDisplay = gameState.gameMods?.useConstantSerenityScaling 
+                ? gameState.gameMods.serenityGainDivisor 
+                : gameState.resetsForBestZone;
+              showMessage(`Chaos Transcended!<br>+${formatNumber(serenityGain)} Serenity Points (4x bonus)<br>Formula: (Zone ${gameState.bestCompletedZone}^${gameState.serenityGainZoneExponent} ÷ ${divisorDisplay}) × 4`, backgroundColors["prestige"]);
+              
+              showSerenityIfUnlocked();
+            } else {
+              // Original behavior: just show completion message, no serenity awarded yet
+              showMessage("Chaos Transcended!<br>You may now prestige to gain Serenity points.", backgroundColors["prestige"]);
+              // Fix: Make sure to call showSerenityUnlockedModal if the option is enabled
+              if (!gameState.gameMods?.disableSerenityUnlockedModal && gameState.serenity < 100) {
+                showSerenityUnlockedModal();
+              }
+              gameState.prestigeAvailable = true;
+            }
+            
+            if (!gameState.thirdSectionUnlocked) {
+              gameState.thirdSectionUnlocked = true;
+              showMessage("Third prestige section unlocked!", backgroundColors["prestige"]);
+            }
+          }
+          
+          // For non-Discover Serenity prestige tasks, still enable the prestige modal
+          if (task.name !== "Discover Serenity" && !gameState.prestigeAvailable) {
+            //if(gameState.serenity < 100) {
+            //  showSerenityUnlockedModal();
+            //}
             gameState.prestigeAvailable = true;
           }
         }
@@ -4458,14 +5458,43 @@
             });
           }
           const chosenIdx = candidateTasks[0].idx;
-          const taskDiv = document.querySelector(`.task[data-zone-index="${currentZoneIndex}"][data-task-index="${chosenIdx}"]`);
-          if (taskDiv) {
-            const btn = taskDiv.querySelector("button");
-            const progressFill = taskDiv.querySelector(".current-progress-fill");
-            const repContainer = taskDiv.querySelector(".rep-container");
-            if (btn && progressFill && repContainer) {
-              startTask(currentZoneIndex, chosenIdx, btn, progressFill, repContainer);
-              taskStarted = true;
+          const nextTask = zone.tasks[chosenIdx];
+          
+          // Smart Cybernetic Armor automation (only if Auto-apply Armor is enabled)
+          let shouldWaitForArmorTarget = false;
+          if (gameState.automation?.autoApplyArmor && gameState.autoConsumeEnabled && gameState.resources["cybernetic_armor"] > 0) {
+            const nextTaskEnergyCost = estimateEnergyDrain(nextTask, zone);
+            const armorAvailable = gameState.resources["cybernetic_armor"];
+            const energyPerArmor = gameState.energy / armorAvailable;
+            
+            const globalArmorActive = gameState.cyberneticArmorTaskRunning;
+            
+            // Check if we should use armor: predicted cost > (remaining energy / armor available)
+            if (nextTaskEnergyCost > energyPerArmor) {
+              // If there are other tasks running, wait for them to complete first
+              if (currentTasks.length > 0) {
+                shouldWaitForArmorTarget = true;
+              } else {
+                // Auto-consume one Cybernetic Armor and set the global flag
+                consumeResource("cybernetic_armor", 1);
+                gameState.cyberneticArmorTaskRunning = true;
+                const energySaved = Math.round(nextTaskEnergyCost * 0.75);
+                showMessage(`Smart Automation: Used Cybernetic Armor<br>Saving ~${energySaved} energy (75% reduction)`, "#00ff00");
+                updateActiveResourcesOverlay();
+              }
+            }
+          }
+          
+          if (!shouldWaitForArmorTarget) {
+            const taskDiv = document.querySelector(`.task[data-zone-index="${currentZoneIndex}"][data-task-index="${chosenIdx}"]`);
+            if (taskDiv) {
+              const btn = taskDiv.querySelector("button");
+              const progressFill = taskDiv.querySelector(".current-progress-fill");
+              const repContainer = taskDiv.querySelector(".rep-container");
+              if (btn && progressFill && repContainer) {
+                startTask(currentZoneIndex, chosenIdx, btn, progressFill, repContainer);
+                taskStarted = true;
+              }
             }
           }
         }
@@ -4528,6 +5557,9 @@
     //TODO: remove - fixed for missing variables
     gameState.serenityUnlockables = gameState.serenityUnlockables || {};
     gameState.serenityInfinite = gameState.serenityInfinite || {};
+    
+    // MOD: Initialize perks object
+    gameState.perks = gameState.perks || {};
     gameState.automationOverrides = gameState.automationOverrides || {};
     gameState.bestCompletedZone = gameState.bestCompletedZone || gameState.highestCompletedZone;
     gameState.resetsForBestZone = gameState.resetsForBestZone || gameState.resetsForHighestZone;
@@ -4539,6 +5571,7 @@
     gameState.elixirEnergy = gameState.elixirEnergy || 3;
     gameState.startingLevel = gameState.startingLevel || 1;
     gameState.serenityGainZoneExponent = gameState.serenityGainZoneExponent || 3;
+    gameState.serenityGainDivisor = gameState.serenityGainDivisor || 1000;
     gameState.numAtomicParticles = gameState.numAtomicParticles || 0;
     gameState.numTimeFraments = gameState.numTimeFraments || 0;
     gameState.numMasterBalls = gameState.numMasterBalls || 0;
@@ -4560,6 +5593,47 @@
     gameState.totalCyberneticImplantEnergy = gameState.totalCyberneticImplantEnergy || 0;
     gameState.haxorEnergyDrainReduction = gameState.haxorEnergyDrainReduction || 0.9;
     gameState.cognitiveCache = gameState.cognitiveCache || {};
+
+    // MOD: Initialize new game mods and automation settings
+    gameState.gameMods = gameState.gameMods || {};
+    gameState.gameMods.permanentAutomation = gameState.gameMods.permanentAutomation ?? false;
+    gameState.gameMods.awardSerenityOnDiscovery = gameState.gameMods.awardSerenityOnDiscovery ?? false;
+    gameState.gameMods.useConstantSerenityScaling = gameState.gameMods.useConstantSerenityScaling ?? false;
+    gameState.gameMods.serenityGainDivisor = gameState.gameMods.serenityGainDivisor ?? 1000;
+    gameState.gameMods.enableAdvancedAutomation = gameState.gameMods.enableAdvancedAutomation ?? false;
+    gameState.gameMods.disablePauseOnGameOver = gameState.gameMods.disablePauseOnGameOver ?? false;
+    gameState.gameMods.disableSerenityUnlockedModal = gameState.gameMods.disableSerenityUnlockedModal ?? false;
+    gameState.gameMods.disable10CompletionRequirement = gameState.gameMods.disable10CompletionRequirement ?? false;
+    
+    gameState.automation = gameState.automation || {};
+    gameState.automation.resumeOnReset = gameState.automation.resumeOnReset ?? false;
+    gameState.automation.autoApplyArmor = gameState.automation.autoApplyArmor ?? false;
+    // Initialize new auto-use options
+    gameState.automation.disableAutoUseOnCopiumReset = gameState.automation.disableAutoUseOnCopiumReset ?? false;
+    gameState.automation.enableAutoUseAfterEnergyResets = gameState.automation.enableAutoUseAfterEnergyResets ?? false;
+    gameState.automation.enableAutoUseResetCount = gameState.automation.enableAutoUseResetCount ?? 1;
+    gameState.automation.disableAutoUseAfterEnergyResets = gameState.automation.disableAutoUseAfterEnergyResets ?? false;
+    gameState.automation.disableAutoUseResetCount = gameState.automation.disableAutoUseResetCount ?? 1;
+    gameState.automation.energyResetsSinceAutoUseChange = gameState.automation.energyResetsSinceAutoUseChange ?? 0;
+    gameState.automation.lockAutomationOrder = gameState.automation.lockAutomationOrder ?? false;
+    
+    gameState.automation.autoUseGauntletOnReset = gameState.automation.autoUseGauntletOnReset ?? false;
+    gameState.automation.autoUseGauntletWhenEven = gameState.automation.autoUseGauntletWhenEven ?? false;
+    gameState.automation.autoUseGauntletAllButOne = gameState.automation.autoUseGauntletAllButOne ?? false;
+
+    gameState.automation.autoUseStardustOnReset = gameState.automation.autoUseStardustOnReset ?? false;
+    gameState.automation.stardustResetResource = gameState.automation.stardustResetResource ?? "cybernetic_armor";
+    
+    // Initialize cosmic shard automation
+    gameState.automation.autoUseCosmicShardForAction = gameState.automation.autoUseCosmicShardForAction ?? false;
+    gameState.automation.cosmicShardTargetAction = gameState.automation.cosmicShardTargetAction ?? "";
+    
+    // Initialize stop automation at zone feature
+    gameState.automation.stopAutomationAtZone = gameState.automation.stopAutomationAtZone ?? false;
+    gameState.automation.stopAutomationZoneNumber = gameState.automation.stopAutomationZoneNumber ?? 1;
+    
+    // Initialize automation UI state
+    gameState.automationCollapsed = gameState.automationCollapsed ?? true;
 
     // Cleanup old values:
     if ("luck_of_the_irish" in gameState.perks) {
@@ -4588,6 +5662,22 @@
     updatePerksCount();
     displayZone();
     initializeSerenityUpgrades();
+    
+    // MOD: Apply automation perks based on permanent automation setting
+    if (gameState.gameMods.permanentAutomation) {
+      gameState.perks["self_operating_gadget"] = true;
+      gameState.perks["simulation_engine"] = true;
+      gameState.serenityUnlockables["Smarter Automation"] = true;
+      gameState.serenityUnlockables["Cognitive Cache"] = true;
+      gameState.serenityUnlockables["Resource Consumer"] = true;
+      gameState.serenityUnlockables["Instant Simulation"] = true;
+      gameState.serenityUnlockables["Resource Guru"] = true;
+    } else {
+      // If permanent automation is disabled, only remove automation features if they weren't legitimately unlocked
+      // This is the fix for Issue 5 - we don't delete legitimately earned unlocks
+      // The original logic was buggy and would delete legitimate unlocks
+    }
+
     setTimeout(() => {
       updateActiveResourcesOverlay();
     }, 100);

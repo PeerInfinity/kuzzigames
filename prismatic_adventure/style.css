@@ -951,6 +951,11 @@ footer {
   color: #fff !important;
 }
 
+.modal-content button.btn-purple {
+  background-color: #8e44ad !important;
+  color: #fff !important;
+}
+
 .modal-content button.btn-degens {
   padding: 0;
   display: flex;
@@ -1118,6 +1123,75 @@ footer {
   box-shadow: 0 0 15px rgba(46, 204, 113, 0.8);
 }
 
+#automationControls {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #444;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: flex-start;
+  font-size: 0.9em;
+}
+
+#automationControls div {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+}
+
+/* Ensure each automation control (label and input elements) appears on its own line */
+#automationControls label,
+#automationControls > div {
+  display: block;
+  width: 100%;
+  margin-bottom: 8px;
+  text-align: left;
+}
+
+/* Style the collapsible content container */
+#automationContent {
+  padding-left: 10px;
+  text-align: left;
+}
+
+/* For div containers that have both checkbox and number input (like the energy reset options) */
+#automationControls > div {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 5px;
+  margin-bottom: 8px;
+  text-align: left;
+}
+
+#automationControls > div label {
+  margin-bottom: 0;
+  margin-right: 5px;
+  text-align: left;
+}
+
+.mods-container {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  align-items: flex-start;
+  text-align: left;
+}
+.mods-container label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mods-container input[type="number"] {
+  width: 80px;
+  background: #333;
+  color: #fff;
+  border: 1px solid #666;
+  border-radius: 4px;
+  padding: 5px;
+}
 
 footer {
   background-color: transparent;
