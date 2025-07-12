@@ -5423,6 +5423,12 @@
         let taskStarted = false;
         const zone = zones[currentZoneIndex];
         
+        // If armor is active, don't start new tasks until the armor-requiring task completes
+        if (gameState.cyberneticArmorTaskRunning) {
+          // Don't start new tasks while armor is active
+          return;
+        }
+        
         let candidateTasks = [];
         for (let idx = 0; idx < zone.tasks.length; idx++) {
           const task = zone.tasks[idx];
@@ -5518,15 +5524,41 @@
                   task.count < task.maxReps &&
                   (gameState.automationOverrides[key] !== false) &&
                   !currentTasks.some(t => t.zoneIndex === currentZoneIndex && t.taskIndex === idx)) {
-                const taskDiv = document.querySelector(`.task[data-zone-index="${currentZoneIndex}"][data-task-index="${idx}"]`);
-                if (taskDiv) {
-                  const btn = taskDiv.querySelector("button");
-                  const progressFill = taskDiv.querySelector(".current-progress-fill");
-                  const repContainer = taskDiv.querySelector(".rep-container");
-                  if (btn && progressFill && repContainer) {
-                    startTask(currentZoneIndex, idx, btn, progressFill, repContainer);
-                    taskStarted = true;
-                    break;
+                
+                // Smart Cybernetic Armor automation for Travel tasks
+                let shouldWaitForArmorTargetTravel = false;
+                if (gameState.automation?.autoApplyArmor && gameState.autoConsumeEnabled && gameState.resources["cybernetic_armor"] > 0) {
+                  const travelTaskEnergyCost = estimateEnergyDrain(task, zone);
+                  const armorAvailable = gameState.resources["cybernetic_armor"];
+                  const energyPerArmor = gameState.energy / armorAvailable;
+                  
+                  // Check if we should use armor: predicted cost > (remaining energy / armor available)
+                  if (travelTaskEnergyCost > energyPerArmor) {
+                    // If there are other tasks running, wait for them to complete first
+                    if (currentTasks.length > 0) {
+                      shouldWaitForArmorTargetTravel = true;
+                    } else {
+                      // Auto-consume one Cybernetic Armor and set the global flag
+                      consumeResource("cybernetic_armor", 1);
+                      gameState.cyberneticArmorTaskRunning = true;
+                      const energySaved = Math.round(travelTaskEnergyCost * 0.75);
+                      showMessage(`Smart Automation: Used Cybernetic Armor for Travel<br>Saving ~${energySaved} energy (75% reduction)`, "#00ff00");
+                      updateActiveResourcesOverlay();
+                    }
+                  }
+                }
+                
+                if (!shouldWaitForArmorTargetTravel) {
+                  const taskDiv = document.querySelector(`.task[data-zone-index="${currentZoneIndex}"][data-task-index="${idx}"]`);
+                  if (taskDiv) {
+                    const btn = taskDiv.querySelector("button");
+                    const progressFill = taskDiv.querySelector(".current-progress-fill");
+                    const repContainer = taskDiv.querySelector(".rep-container");
+                    if (btn && progressFill && repContainer) {
+                      startTask(currentZoneIndex, idx, btn, progressFill, repContainer);
+                      taskStarted = true;
+                      break;
+                    }
                   }
                 }
               }
